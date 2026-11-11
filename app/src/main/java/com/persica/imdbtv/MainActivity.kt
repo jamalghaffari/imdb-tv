@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.ProgressBar
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
@@ -83,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
     }
 
+    // Bridge for web app to communicate with native Android
     class WebAppInterface(private val activity: MainActivity) {
         @JavascriptInterface
         fun playNative(title: String, url: String) {
@@ -91,6 +93,49 @@ class MainActivity : AppCompatActivity() {
                 putExtra("url", url)
             }
             activity.startActivity(intent)
+        }
+
+        @JavascriptInterface
+        fun playExternal(url: String) {
+            activity.launchExternalPlayer(url)
+        }
+    }
+
+    fun launchExternalPlayer(rawUrl: String) {
+        // Clean URL from any duplicate vlc:// prefixes
+        var cleanUrl = rawUrl.trim()
+        if (cleanUrl.startsWith("vlc://https://")) {
+            cleanUrl = "https://" + cleanUrl.removePrefix("vlc://https://")
+        } else if (cleanUrl.startsWith("vlc://http://")) {
+            cleanUrl = "http://" + cleanUrl.removePrefix("vlc://http://")
+        } else if (cleanUrl.startsWith("vlc://")) {
+            cleanUrl = cleanUrl.removePrefix("vlc://")
+        }
+
+        try {
+            // First try to launch specifically in VLC with clean media URI
+            val vlcIntent = Intent(Intent.ACTION_VIEW).apply {
+                setPackage("org.videolan.vlc")
+                setDataAndType(Uri.parse(cleanUrl), "video/*")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(vlcIntent)
+        } catch (e: Exception) {
+            try {
+                // If VLC is not default or not installed, offer chooser (MX Player, KMPlayer, etc.)
+                val chooserIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.parse(cleanUrl), "video/*")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(Intent.createChooser(chooserIntent, "پخش فیلم با:"))
+            } catch (err: Exception) {
+                // Fallback to internal native ExoPlayer
+                val intent = Intent(this, PlayerActivity::class.java).apply {
+                    putExtra("title", "پخش مستقیم فیلم")
+                    putExtra("url", cleanUrl)
+                }
+                startActivity(intent)
+            }
         }
     }
 
@@ -115,14 +160,8 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: return false
 
-                // If URL is video stream or vlc protocol, play in Native ExoPlayer
-                val rawUrl = if (url.startsWith("vlc://")) url.removePrefix("vlc://") else url
-                if (rawUrl.endsWith(".mkv") || rawUrl.endsWith(".mp4") || rawUrl.endsWith(".m3u8") || rawUrl.contains("/Film/")) {
-                    val intent = Intent(this@MainActivity, PlayerActivity::class.java).apply {
-                        putExtra("title", "پخش آنلاین سینما")
-                        putExtra("url", rawUrl)
-                    }
-                    startActivity(intent)
+                if (url.startsWith("vlc://")) {
+                    launchExternalPlayer(url)
                     return true
                 }
 
