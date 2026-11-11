@@ -341,7 +341,7 @@ class MainActivity : AppCompatActivity() {
                 webView.visibility = View.VISIBLE
                 fullscreenContainer.visibility = View.GONE
                 fullscreenContainer.removeView(customView)
-                customViewCallback?.onHideCustomView()
+                customViewCallback?.onCustomViewHidden()
                 customView = null
                 customViewCallback = null
             }
