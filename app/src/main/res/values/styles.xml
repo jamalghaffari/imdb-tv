@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.Leanback" parent="Theme.Leanback.Browse">
+        <item name="android:colorPrimary">#F5C518</item>
+        <item name="android:windowBackground">#08090D</item>
+    </style>
+</resources>
