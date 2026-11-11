@@ -6,13 +6,19 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.os.Message
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.ProgressBar
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONArray
+import java.io.ByteArrayInputStream
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
@@ -20,6 +26,29 @@ class MainActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private lateinit var fullscreenContainer: FrameLayout
+    private var lastBackPressedMs: Long = 0L
+    private var lastSniffedUrl: String = ""
+
+    private val playerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_FIRST_USER) {
+            webView.post {
+                webView.evaluateJavascript("window.__openOnlineEmbedFallback && window.__openOnlineEmbedFallback();", null)
+            }
+        }
+    }
+
+    private val adHostKeywords = listOf(
+        "popads", "popcash", "adsterra", "doubleclick", "googlesyndication",
+        "exoclick", "trafficjunky", "juicyads", "adnxs", "propellerads",
+        "acscdn", "highperformanceformat", "effectivegatecpm", "onclickperformance",
+        "pushance", "realsrv", "tsyndicate", "monetag"
+    )
+
+    private val allowedNavHosts = listOf(
+        "persicatheme.ir", "vidsrc.", "2embed.", "imdb.com", "youtube.com", "youtu.be"
+    )
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,6 +95,12 @@ class MainActivity : AppCompatActivity() {
         rootLayout.addView(fullscreenContainer)
         setContentView(rootLayout)
 
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBackOrExit()
+            }
+        })
+
         configureWebView()
 
         val isTv = isAndroidTv()
@@ -79,6 +114,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.loadUrl(targetUrl)
+        webView.requestFocus()
     }
 
     private fun isAndroidTv(): Boolean {
@@ -86,14 +122,43 @@ class MainActivity : AppCompatActivity() {
         return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
     }
 
-    class WebAppInterface(private val activity: MainActivity) {
+    inner class WebAppInterface(private val activity: MainActivity) {
         @JavascriptInterface
         fun playNative(title: String, url: String) {
             val intent = Intent(activity, PlayerActivity::class.java).apply {
                 putExtra("title", title)
                 putExtra("url", url)
             }
-            activity.startActivity(intent)
+            activity.runOnUiThread { activity.playerLauncher.launch(intent) }
+        }
+
+        @JavascriptInterface
+        fun playNativeWithReferer(title: String, url: String, referer: String) {
+            val intent = Intent(activity, PlayerActivity::class.java).apply {
+                putExtra("title", title)
+                putExtra("url", url)
+                if (referer.isNotBlank()) putExtra("referer", referer)
+            }
+            activity.runOnUiThread { activity.playerLauncher.launch(intent) }
+        }
+
+        @JavascriptInterface
+        fun playNativeList(title: String, urlsJson: String) {
+            val list = ArrayList<String>()
+            try {
+                val arr = JSONArray(urlsJson)
+                for (i in 0 until arr.length()) {
+                    val u = arr.optString(i)
+                    if (u.isNotBlank()) list.add(u)
+                }
+            } catch (_: Exception) {
+                if (urlsJson.startsWith("http")) list.add(urlsJson)
+            }
+            val intent = Intent(activity, PlayerActivity::class.java).apply {
+                putExtra("title", title)
+                putStringArrayListExtra("urls", list)
+            }
+            activity.runOnUiThread { activity.playerLauncher.launch(intent) }
         }
 
         @JavascriptInterface
@@ -131,7 +196,7 @@ class MainActivity : AppCompatActivity() {
                     putExtra("title", "پخش مستقیم فیلم")
                     putExtra("url", cleanUrl)
                 }
-                startActivity(intent)
+                playerLauncher.launch(intent)
             }
         }
     }
@@ -151,34 +216,79 @@ class MainActivity : AppCompatActivity() {
         settings.loadWithOverviewMode = true
         settings.builtInZoomControls = false
         settings.displayZoomControls = false
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+        settings.setSupportMultipleWindows(false)
+        settings.javaScriptCanOpenWindowsAutomatically = false
         settings.cacheMode = WebSettings.LOAD_DEFAULT
+        settings.userAgentString = "Mozilla/5.0 (Linux; Android 11; SHIELD Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
         webView.addJavascriptInterface(WebAppInterface(this), "AndroidBridge")
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: return false
+                val lower = url.lowercase()
 
-                if (url.startsWith("vlc://")) {
+                if (lower.startsWith("vlc://")) {
                     launchExternalPlayer(url)
                     return true
                 }
 
-                if (url.startsWith("intent://")) {
+                if (lower.startsWith("intent://")) {
                     try {
                         val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
                         startActivity(intent)
                         return true
                     } catch (e: Exception) {
-                        return false
+                        return true
+                    }
+                }
+
+                // مسدودسازی ریدایرکت‌های تبلیغاتی پاپ‌آپ هنگام پخش آنلاین
+                if (adHostKeywords.any { lower.contains(it) }) {
+                    return true
+                }
+
+                if (request?.isForMainFrame == true && (lower.startsWith("http://") || lower.startsWith("https://"))) {
+                    val host = Uri.parse(url).host?.lowercase() ?: ""
+                    if (allowedNavHosts.none { host.contains(it) }) {
+                        // اجازه خروج ناخواسته به سایت‌های تبلیغاتی را نده
+                        return true
                     }
                 }
 
                 return false
             }
 
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                val url = request?.url?.toString() ?: return null
+                val lower = url.lowercase()
+
+                // مسدودسازی اسکریپت‌های پاپ‌آپ و تبلیغاتی داخل پلیرهای امبد
+                if (lower.contains("/sbx.js") || lower.contains("disable-devtool") || adHostKeywords.any { lower.contains(it) }) {
+                    return WebResourceResponse("application/javascript", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+                }
+
+                // شکار هوشمند لینک استریم واقعی (.m3u8 یا .mp4) برای پخش بدون تبلیغ در پلیر نیتیو
+                if ((lower.contains(".m3u8") || (lower.contains(".mp4") && !lower.contains("ads"))) &&
+                    !lower.contains("persicatheme.ir") && url != lastSniffedUrl
+                ) {
+                    lastSniffedUrl = url
+                    val ref = request.requestHeaders["Referer"] ?: request.requestHeaders["Origin"] ?: ""
+                    val safeUrl = url.replace("'", "\\'")
+                    val safeRef = ref.replace("'", "\\'")
+                    webView.post {
+                        webView.evaluateJavascript(
+                            "window.__onSniffedStream && window.__onSniffedStream('$safeUrl', '$safeRef');",
+                            null
+                        )
+                    }
+                }
+
+                return super.shouldInterceptRequest(view, request)
+            }
+
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                // If live server fails mid-way, smoothly fall back to local assets without showing chrome robot error
                 if (request?.isForMainFrame == true) {
                     val fallback = if (isAndroidTv()) {
                         "file:///android_asset/web/index.html?tv=1"
@@ -197,10 +307,16 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 progressBar.visibility = View.GONE
+                webView.requestFocus()
             }
         }
 
         webView.webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
+                // مسدودسازی کامل پاپ‌آپ‌های تبلیغاتی
+                return false
+            }
+
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 progressBar.progress = newProgress
                 if (newProgress >= 100) {
@@ -225,31 +341,45 @@ class MainActivity : AppCompatActivity() {
                 webView.visibility = View.VISIBLE
                 fullscreenContainer.visibility = View.GONE
                 fullscreenContainer.removeView(customView)
-                customViewCallback?.onCustomViewHidden()
+                customViewCallback?.onHideCustomView()
                 customView = null
                 customViewCallback = null
             }
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (customView != null && keyCode == KeyEvent.KEYCODE_BACK) {
+    private fun handleBackOrExit() {
+        if (customView != null) {
             webView.webChromeClient?.onHideCustomView()
-            return true
+            return
         }
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            // اول از JavaScript بپرس آیا پنجره‌ای (مودال دانلود/پخش/پروفایل) باز است تا همان را ببندد و از اپ نپرد بیرون!
-            webView.evaluateJavascript(
-                "(function(){ return window.__closeAnyModal ? window.__closeAnyModal() : false; })()"
-            ) { result ->
-                if (result != "true") {
-                    if (webView.canGoBack()) {
-                        webView.goBack()
-                    } else {
+        webView.evaluateJavascript(
+            "(function(){ return window.__closeAnyModal ? window.__closeAnyModal() : false; })()"
+        ) { result ->
+            if (result != "true") {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    val now = System.currentTimeMillis()
+                    if (now - lastBackPressedMs < 2500L) {
                         finish()
+                    } else {
+                        lastBackPressedMs = now
+                        val msg = "برای خروج از برنامه، دکمه Exit / بازگشت را دوباره بزنید"
+                        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                        webView.evaluateJavascript(
+                            "window.__showAppToast && window.__showAppToast('$msg');",
+                            null
+                        )
                     }
                 }
             }
+        }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            handleBackOrExit()
             return true
         }
         return super.onKeyDown(keyCode, event)

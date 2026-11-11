@@ -2,8 +2,10 @@ package com.persica.imdbtv
 
 import android.app.AlertDialog
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
@@ -13,29 +15,51 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 class PlayerActivity : AppCompatActivity() {
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
     private lateinit var topOverlay: LinearLayout
+    private lateinit var loadingSpinner: ProgressBar
+    private lateinit var errorOverlay: LinearLayout
+    private lateinit var errorDetailText: TextView
 
-    private var subtitleScale = 1.0f // 0.8, 1.0, 1.3, 1.6
+    private var candidateUrls: List<String> = emptyList()
+    private var currentUrlIndex = 0
+    private var customReferer: String? = null
+    private var movieTitle: String = "سینما"
+
+    private var subtitleScale = 1.0f
     private var subtitleColor = Color.WHITE
-    private var subtitleBgAlpha = 0x00 // Transparent by default (no dark box)
+    private var subtitleBgAlpha = 0x00
     private var resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     private var playbackSpeed = 1.0f
 
@@ -56,6 +80,18 @@ class PlayerActivity : AppCompatActivity() {
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        movieTitle = intent.getStringExtra("title") ?: "سینما"
+        customReferer = intent.getStringExtra("referer")
+        val urlsExtra = intent.getStringArrayListExtra("urls")
+        val singleUrl = intent.getStringExtra("url") ?: ""
+        candidateUrls = if (!urlsExtra.isNullOrEmpty()) {
+            urlsExtra.filter { it.isNotBlank() }.distinct()
+        } else if (singleUrl.isNotBlank()) {
+            listOf(singleUrl)
+        } else {
+            emptyList()
+        }
+
         val root = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -71,7 +107,7 @@ class PlayerActivity : AppCompatActivity() {
             )
             useController = true
             controllerAutoShow = true
-            controllerShowTimeoutMs = 3500
+            controllerShowTimeoutMs = 4000
             setShowNextButton(false)
             setShowPreviousButton(false)
             setShutterBackgroundColor(Color.BLACK)
@@ -80,20 +116,16 @@ class PlayerActivity : AppCompatActivity() {
 
         applySubtitleStyle()
 
-        // Clean top bar (only visible when controller is visible — NO permanent dark box!)
         topOverlay = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(40, 28, 40, 20)
-            setBackgroundColor(0x00000000)
+            setPadding(36, 26, 36, 18)
+            setBackgroundColor(0x66000000)
             visibility = View.GONE
         }
 
-        val titleText = intent.getStringExtra("title") ?: "سینما IMDb"
-        val videoUrl = intent.getStringExtra("url") ?: ""
-
         val titleView = TextView(this).apply {
-            text = titleText
+            text = movieTitle
             setTextColor(Color.WHITE)
             textSize = 16f
             setTypeface(null, Typeface.BOLD)
@@ -101,46 +133,292 @@ class PlayerActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
 
-        val btnSettings = Button(this).apply {
-            text = "⚙️ تنظیمات پخش و زیرنویس"
-            setTextColor(Color.BLACK)
-            setBackgroundColor(0xFFF5C518.toInt())
-            textSize = 12f
-            isFocusable = true
-            setPadding(24, 12, 24, 12)
-            setOnClickListener { showPlayerSettingsDialog() }
+        val btnAudio = makeTopButton("🎙 صدا/دوبله", 0xFF27272A.toInt(), Color.WHITE) {
+            showTrackPicker(C.TRACK_TYPE_AUDIO, "انتخاب زبان / صدای فیلم")
         }
-
-        val btnBack = Button(this).apply {
-            text = "✕ خروج"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0x99222222.toInt())
-            textSize = 12f
-            isFocusable = true
-            setPadding(22, 12, 22, 12)
-            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(16, 0, 0, 0)
-            layoutParams = lp
-            setOnClickListener { finish() }
+        val btnSub = makeTopButton("💬 زیرنویس", 0xFF27272A.toInt(), Color.WHITE) {
+            showTrackPicker(C.TRACK_TYPE_TEXT, "انتخاب زیرنویس")
+        }
+        val btnSettings = makeTopButton("⚙️ تنظیمات", 0xFFF5C518.toInt(), Color.BLACK) {
+            showPlayerSettingsDialog()
+        }
+        val btnVlc = makeTopButton("▶ VLC", 0xFFEA580C.toInt(), Color.WHITE) {
+            openCurrentInExternalPlayer()
+        }
+        val btnBack = makeTopButton("✕ خروج", 0x99222222.toInt(), Color.WHITE) {
+            finish()
         }
 
         topOverlay.addView(titleView)
+        topOverlay.addView(btnAudio)
+        topOverlay.addView(btnSub)
         topOverlay.addView(btnSettings)
+        topOverlay.addView(btnVlc)
         topOverlay.addView(btnBack)
+
+        loadingSpinner = ProgressBar(this).apply {
+            isIndeterminate = true
+            visibility = View.VISIBLE
+        }
+
+        errorOverlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(0xEE08090D.toInt())
+            setPadding(48, 48, 48, 48)
+            visibility = View.GONE
+        }
+
+        errorDetailText = TextView(this).apply {
+            text = "پخش این لینک با خطا مواجه شد."
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 28)
+        }
+
+        val errButtonsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+
+        val btnRetry = makeTopButton("🔄 تلاش مجدد", 0xFFF5C518.toInt(), Color.BLACK) {
+            errorOverlay.visibility = View.GONE
+            currentUrlIndex = 0
+            playCandidateAt(0)
+        }
+        val btnErrExternal = makeTopButton("▶ پخش با VLC / پلیر گوشی", 0xFFEA580C.toInt(), Color.WHITE) {
+            openCurrentInExternalPlayer()
+        }
+        val btnErrOnline = makeTopButton("🌐 سرور پخش آنلاین", 0xFF7C3AED.toInt(), Color.WHITE) {
+            setResult(RESULT_FIRST_USER)
+            finish()
+        }
+        val btnErrClose = makeTopButton("✕ بستن", 0xFF27272A.toInt(), Color.WHITE) {
+            finish()
+        }
+
+        errButtonsRow.addView(btnRetry)
+        errButtonsRow.addView(btnErrExternal)
+        errButtonsRow.addView(btnErrOnline)
+        errButtonsRow.addView(btnErrClose)
+
+        errorOverlay.addView(errorDetailText)
+        errorOverlay.addView(errButtonsRow)
 
         playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
             topOverlay.visibility = visibility
         })
 
         root.addView(playerView)
+        root.addView(loadingSpinner, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER
+        ))
         root.addView(topOverlay, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.TOP
+        ))
+        root.addView(errorOverlay, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
         ))
         setContentView(root)
 
-        initPlayer(videoUrl)
+        initPlayer()
+        if (candidateUrls.isNotEmpty()) {
+            playCandidateAt(0)
+        } else {
+            showErrorState("لینک پخشی برای این فیلم یافت نشد.")
+        }
+    }
+
+    private fun makeTopButton(label: String, bgColor: Int, fgColor: Int, onClick: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            setTextColor(fgColor)
+            setBackgroundColor(bgColor)
+            textSize = 12f
+            isAllCaps = false
+            isFocusable = true
+            setPadding(20, 10, 20, 10)
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(10, 0, 0, 0)
+            layoutParams = lp
+            setOnClickListener { onClick() }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun initPlayer() {
+        val browserUa = "Mozilla/5.0 (Linux; Android 11; SHIELD Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+        val okHttpClient = OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(35, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val reqBuilder = req.newBuilder()
+                    .header("User-Agent", browserUa)
+                    .header("Accept", "*/*")
+                val ref = customReferer ?: "${req.url.scheme}://${req.url.host}/"
+                if (req.header("Referer") == null) {
+                    reqBuilder.header("Referer", ref)
+                }
+                chain.proceed(reqBuilder.build())
+            }
+            .build()
+
+        val httpFactory = OkHttpDataSource.Factory(okHttpClient)
+            .setUserAgent(browserUa)
+
+        val dataSourceFactory = DefaultDataSource.Factory(this, httpFactory)
+
+        val renderersFactory = DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
+
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15000, 60000, 2500, 5000)
+            .build()
+
+        val trackSelector = DefaultTrackSelector(this).apply {
+            setParameters(
+                buildUponParameters()
+                    .setPreferredAudioLanguages("fa", "per", "fas", "en")
+                    .setPreferredTextLanguages("fa", "per", "fas", "en")
+            )
+        }
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(5))
+
+        player = ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .build()
+
+        playerView.player = player
+
+        player?.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                loadingSpinner.visibility = if (playbackState == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                loadingSpinner.visibility = View.GONE
+                if (currentUrlIndex + 1 < candidateUrls.size) {
+                    currentUrlIndex++
+                    Toast.makeText(
+                        this@PlayerActivity,
+                        "تلاش با سرور جایگزین (${currentUrlIndex + 1}/${candidateUrls.size})...",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    playCandidateAt(currentUrlIndex)
+                } else {
+                    showErrorState("خطا در پخش مستقیم (${error.errorCodeName}). می‌توانید با سرور آنلاین یا VLC پخش کنید.")
+                }
+            }
+        })
+    }
+
+    private fun playCandidateAt(index: Int) {
+        val url = candidateUrls.getOrNull(index) ?: return
+        loadingSpinner.visibility = View.VISIBLE
+        errorOverlay.visibility = View.GONE
+        val mediaItem = MediaItem.fromUri(url)
+        player?.apply {
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    private fun showErrorState(msg: String) {
+        loadingSpinner.visibility = View.GONE
+        errorDetailText.text = msg
+        errorOverlay.visibility = View.VISIBLE
+    }
+
+    private fun openCurrentInExternalPlayer() {
+        val rawUrl = candidateUrls.getOrNull(currentUrlIndex) ?: candidateUrls.firstOrNull() ?: return
+        try {
+            val vlcIntent = Intent(Intent.ACTION_VIEW).apply {
+                setPackage("org.videolan.vlc")
+                setDataAndType(Uri.parse(rawUrl), "video/*")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(vlcIntent)
+        } catch (e: Exception) {
+            try {
+                val chooser = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.parse(rawUrl), "video/*")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(Intent.createChooser(chooser, "پخش با پلیر خارجی:"))
+            } catch (_: Exception) {
+                Toast.makeText(this, "پلیر خارجی (مثل VLC یا MX Player) نصب نیست", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun showTrackPicker(trackType: Int, title: String) {
+        val p = player ?: return
+        val groups = p.currentTracks.groups.filter { it.type == trackType }
+        if (groups.isEmpty()) {
+            Toast.makeText(this, "ترک دیگری در این فایل یافت نشد", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+
+        if (trackType == C.TRACK_TYPE_TEXT) {
+            labels.add("بدون زیرنویس (خاموش)")
+            actions.add {
+                p.trackSelectionParameters = p.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build()
+            }
+        }
+
+        var trackCounter = 1
+        groups.forEach { group ->
+            for (i in 0 until group.length) {
+                val fmt = group.getTrackFormat(i)
+                val lang = fmt.language?.uppercase() ?: "نامشخص"
+                val lbl = fmt.label ?: "ترک $trackCounter"
+                val selectedMark = if (group.isTrackSelected(i)) " ✓" else ""
+                labels.add("$lbl ($lang)$selectedMark")
+                val g = group.mediaTrackGroup
+                val idx = i
+                actions.add {
+                    p.trackSelectionParameters = p.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(trackType, false)
+                        .setOverrideForType(TrackSelectionOverride(g, idx))
+                        .build()
+                }
+                trackCounter++
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setItems(labels.toTypedArray()) { _, which ->
+                actions[which].invoke()
+            }
+            .setNegativeButton("بستن", null)
+            .show()
     }
 
     private fun applySubtitleStyle() {
@@ -243,42 +521,29 @@ class PlayerActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun initPlayer(url: String) {
-        if (url.isEmpty()) return
-
-        player = ExoPlayer.Builder(this).build().apply {
-            playerView.player = this
-            val mediaItem = MediaItem.fromUri(url)
-            setMediaItem(mediaItem)
-            prepare()
-            playWhenReady = true
-
-            addListener(object : Player.Listener {
-                override fun onPlayerError(error: PlaybackException) {
-                    super.onPlayerError(error)
-                    Toast.makeText(this@PlayerActivity, "خطا در پخش این لینک. لطفاً سرور یا کیفیت دیگری انتخاب کنید.", Toast.LENGTH_LONG).show()
-                }
-            })
-        }
-    }
-
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_SETTINGS) {
             showPlayerSettingsDialog()
             return true
         }
-        if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            player?.let { it.seekTo(it.currentPosition + 10000) }
-            playerView.showController()
-            return true
-        }
-        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-            player?.let { it.seekTo((it.currentPosition - 10000).coerceAtLeast(0)) }
-            playerView.showController()
-            return true
-        }
-        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
-            if (!playerView.isControllerFullyVisible) {
+        val p = player
+        if (errorOverlay.visibility != View.VISIBLE && p != null && !playerView.isControllerFullyVisible) {
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                p.seekTo((p.currentPosition + 10000).coerceAtMost(p.duration.coerceAtLeast(0L)))
+                playerView.showController()
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                p.seekTo((p.currentPosition - 10000).coerceAtLeast(0))
+                playerView.showController()
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+                if (p.isPlaying) p.pause() else p.play()
+                playerView.showController()
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                 playerView.showController()
                 return true
             }
