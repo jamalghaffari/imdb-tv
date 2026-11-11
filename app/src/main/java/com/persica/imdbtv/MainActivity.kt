@@ -237,8 +237,19 @@ class MainActivity : AppCompatActivity() {
             webView.webChromeClient?.onHideCustomView()
             return true
         }
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
-            webView.goBack()
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            // اول از JavaScript بپرس آیا پنجره‌ای (مودال دانلود/پخش/پروفایل) باز است تا همان را ببندد و از اپ نپرد بیرون!
+            webView.evaluateJavascript(
+                "(function(){ return window.__closeAnyModal ? window.__closeAnyModal() : false; })()"
+            ) { result ->
+                if (result != "true") {
+                    if (webView.canGoBack()) {
+                        webView.goBack()
+                    } else {
+                        finish()
+                    }
+                }
+            }
             return true
         }
         return super.onKeyDown(keyCode, event)
