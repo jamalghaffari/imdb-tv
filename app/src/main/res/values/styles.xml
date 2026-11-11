@@ -1,6 +1,8 @@
 <resources>
-    <style name="Theme.Leanback" parent="Theme.Leanback.Browse">
-        <item name="android:colorPrimary">#F5C518</item>
+    <style name="Theme.App" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">#08090D</item>
+        <item name="android:colorPrimary">#F5C518</item>
+        <item name="android:statusBarColor">#08090D</item>
+        <item name="android:navigationBarColor">#08090D</item>
     </style>
 </resources>
