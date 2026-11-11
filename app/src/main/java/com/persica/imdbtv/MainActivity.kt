@@ -25,7 +25,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Root container
         val rootLayout = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -34,7 +33,6 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFF08090D.toInt())
         }
 
-        // Fullscreen container for video
         fullscreenContainer = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -44,7 +42,6 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFF000000.toInt())
         }
 
-        // WebView with hardware acceleration
         webView = WebView(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -55,11 +52,10 @@ class MainActivity : AppCompatActivity() {
             isFocusableInTouchMode = true
         }
 
-        // Progress bar
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                10
+                8
             )
             max = 100
             visibility = View.VISIBLE
@@ -72,7 +68,6 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
 
-        // Auto-detect Android TV vs Phone
         val isTv = isAndroidTv()
         val targetUrl = if (isTv) {
             "https://persicatheme.ir/imdb/?tv=1"
@@ -86,6 +81,17 @@ class MainActivity : AppCompatActivity() {
     private fun isAndroidTv(): Boolean {
         val uiModeManager = getSystemService(UI_MODE_SERVICE) as? android.app.UiModeManager
         return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+    }
+
+    class WebAppInterface(private val activity: MainActivity) {
+        @JavascriptInterface
+        fun playNative(title: String, url: String) {
+            val intent = Intent(activity, PlayerActivity::class.java).apply {
+                putExtra("title", title)
+                putExtra("url", url)
+            }
+            activity.startActivity(intent)
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -103,18 +109,33 @@ class MainActivity : AppCompatActivity() {
         settings.displayZoomControls = false
         settings.cacheMode = WebSettings.LOAD_DEFAULT
 
+        webView.addJavascriptInterface(WebAppInterface(this), "AndroidBridge")
+
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: return false
-                if (url.startsWith("vlc://") || url.startsWith("intent://")) {
+
+                // If URL is video stream or vlc protocol, play in Native ExoPlayer
+                val rawUrl = if (url.startsWith("vlc://")) url.removePrefix("vlc://") else url
+                if (rawUrl.endsWith(".mkv") || rawUrl.endsWith(".mp4") || rawUrl.endsWith(".m3u8") || rawUrl.contains("/Film/")) {
+                    val intent = Intent(this@MainActivity, PlayerActivity::class.java).apply {
+                        putExtra("title", "پخش آنلاین سینما")
+                        putExtra("url", rawUrl)
+                    }
+                    startActivity(intent)
+                    return true
+                }
+
+                if (url.startsWith("intent://")) {
                     try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
                         startActivity(intent)
                         return true
                     } catch (e: Exception) {
                         return false
                     }
                 }
+
                 return false
             }
 
