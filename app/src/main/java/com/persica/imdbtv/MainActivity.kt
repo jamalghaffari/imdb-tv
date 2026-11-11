@@ -68,15 +68,17 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
 
-        // Load 100% locally from bundled APK assets (Works completely offline with zero network lag!)
         val isTv = isAndroidTv()
-        val localUrl = if (isTv) {
-            "file:///android_asset/web/index.html?tv=1"
-        } else {
-            "file:///android_asset/web/index.html"
+        val useLive = intent.getBooleanExtra("use_live", false)
+
+        val targetUrl = when {
+            useLive && isTv -> "https://persicatheme.ir/imdb/?tv=1"
+            useLive -> "https://persicatheme.ir/imdb/"
+            isTv -> "file:///android_asset/web/index.html?tv=1"
+            else -> "file:///android_asset/web/index.html"
         }
 
-        webView.loadUrl(localUrl)
+        webView.loadUrl(targetUrl)
     }
 
     private fun isAndroidTv(): Boolean {
@@ -176,9 +178,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                // If main frame somehow failed, fall back to local offline bundle
+                // If live server fails mid-way, smoothly fall back to local assets without showing chrome robot error
                 if (request?.isForMainFrame == true) {
-                    view?.loadUrl("file:///android_asset/web/index.html")
+                    val fallback = if (isAndroidTv()) {
+                        "file:///android_asset/web/index.html?tv=1"
+                    } else {
+                        "file:///android_asset/web/index.html"
+                    }
+                    view?.loadUrl(fallback)
                 }
             }
 
