@@ -12,7 +12,6 @@ import android.view.ViewGroup
 import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.ProgressBar
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
@@ -56,10 +55,10 @@ class MainActivity : AppCompatActivity() {
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                8
+                6
             )
             max = 100
-            visibility = View.VISIBLE
+            visibility = View.GONE
         }
 
         rootLayout.addView(webView)
@@ -69,14 +68,15 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
 
+        // Load 100% locally from bundled APK assets (Works completely offline with zero network lag!)
         val isTv = isAndroidTv()
-        val targetUrl = if (isTv) {
-            "https://persicatheme.ir/imdb/?tv=1"
+        val localUrl = if (isTv) {
+            "file:///android_asset/web/index.html?tv=1"
         } else {
-            "https://persicatheme.ir/imdb/"
+            "file:///android_asset/web/index.html"
         }
 
-        webView.loadUrl(targetUrl)
+        webView.loadUrl(localUrl)
     }
 
     private fun isAndroidTv(): Boolean {
@@ -84,7 +84,6 @@ class MainActivity : AppCompatActivity() {
         return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
     }
 
-    // Bridge for web app to communicate with native Android
     class WebAppInterface(private val activity: MainActivity) {
         @JavascriptInterface
         fun playNative(title: String, url: String) {
@@ -102,7 +101,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun launchExternalPlayer(rawUrl: String) {
-        // Clean URL from any duplicate vlc:// prefixes
         var cleanUrl = rawUrl.trim()
         if (cleanUrl.startsWith("vlc://https://")) {
             cleanUrl = "https://" + cleanUrl.removePrefix("vlc://https://")
@@ -113,7 +111,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         try {
-            // First try to launch specifically in VLC with clean media URI
             val vlcIntent = Intent(Intent.ACTION_VIEW).apply {
                 setPackage("org.videolan.vlc")
                 setDataAndType(Uri.parse(cleanUrl), "video/*")
@@ -122,14 +119,12 @@ class MainActivity : AppCompatActivity() {
             startActivity(vlcIntent)
         } catch (e: Exception) {
             try {
-                // If VLC is not default or not installed, offer chooser (MX Player, KMPlayer, etc.)
                 val chooserIntent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(Uri.parse(cleanUrl), "video/*")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 startActivity(Intent.createChooser(chooserIntent, "پخش فیلم با:"))
             } catch (err: Exception) {
-                // Fallback to internal native ExoPlayer
                 val intent = Intent(this, PlayerActivity::class.java).apply {
                     putExtra("title", "پخش مستقیم فیلم")
                     putExtra("url", cleanUrl)
@@ -148,6 +143,8 @@ class MainActivity : AppCompatActivity() {
         settings.mediaPlaybackRequiresUserGesture = false
         settings.allowFileAccess = true
         settings.allowContentAccess = true
+        settings.allowFileAccessFromFileURLs = true
+        settings.allowUniversalAccessFromFileURLs = true
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
         settings.builtInZoomControls = false
@@ -176,6 +173,13 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 return false
+            }
+
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                // If main frame somehow failed, fall back to local offline bundle
+                if (request?.isForMainFrame == true) {
+                    view?.loadUrl("file:///android_asset/web/index.html")
+                }
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
