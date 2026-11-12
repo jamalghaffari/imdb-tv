@@ -97,6 +97,7 @@ class AppDownloadManager(private val context: Context) {
             override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int) = patch(baseFactory.createSocket(address, port, localAddress, localPort))
         }
         OkHttpClient.Builder()
+            .dns(SmartDns)
             .protocols(listOf(Protocol.HTTP_1_1))
             .connectionSpecs(listOf(ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT))
             .sslSocketFactory(compatFactory, trustAll[0] as X509TrustManager)

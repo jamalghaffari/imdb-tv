@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
         val cacheDir = File(applicationContext.cacheDir, "poster_disk_cache")
         val cache = Cache(cacheDir, 120L * 1024L * 1024L) // 120 MB lazy disk cache
         OkHttpClient.Builder()
+            .dns(SmartDns)
             .cache(cache)
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(12, TimeUnit.SECONDS)

@@ -350,6 +350,7 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         val okHttpClient = OkHttpClient.Builder()
+            .dns(SmartDns)
             .protocols(listOf(Protocol.HTTP_1_1))
             .connectionSpecs(listOf(ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT))
             .sslSocketFactory(compatFactory, trustAll[0] as X509TrustManager)
