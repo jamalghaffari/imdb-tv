@@ -5,8 +5,10 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Message
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -16,14 +18,19 @@ import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
+import androidx.core.content.pm.PackageInfoCompat
 import okhttp3.Cache
 import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -139,6 +146,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.loadUrl(targetUrl)
         webView.requestFocus()
+        webView.postDelayed({ checkForAppUpdate() }, 2500L)
     }
 
     private fun isAndroidTv(): Boolean {
@@ -449,6 +457,98 @@ class MainActivity : AppCompatActivity() {
             return true
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    private fun checkForAppUpdate() {
+        Thread {
+            try {
+                val req = Request.Builder()
+                    .url("https://persicatheme.ir/imdb/version.json?t=" + System.currentTimeMillis())
+                    .cacheControl(CacheControl.FORCE_NETWORK)
+                    .build()
+                val resp = imageCacheClient.newCall(req).execute()
+                val body = resp.body?.string()
+                resp.close()
+                if (!resp.isSuccessful || body.isNullOrBlank()) return@Thread
+
+                val json = JSONObject(body)
+                val remoteCode = json.optLong("versionCode", 0L)
+                val remoteName = json.optString("versionName", "")
+                val apkUrl = json.optString("apkUrl", "https://persicatheme.ir/imdb/imdb-tv.apk")
+                val notes = json.optString("notes", "نسخه جدید با بهبودهای عملکردی و باگ‌فیکس آماده نصب است.")
+
+                val pInfo = packageManager.getPackageInfo(packageName, 0)
+                val currentCode = PackageInfoCompat.getLongVersionCode(pInfo)
+
+                if (remoteCode > currentCode && !isFinishing && !isDestroyed) {
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        AlertDialog.Builder(this)
+                            .setTitle("نسخه جدید آماده است ($remoteName)")
+                            .setMessage(notes)
+                            .setPositiveButton("دانلود و نصب") { _, _ ->
+                                downloadAndInstallApk(apkUrl, remoteName)
+                            }
+                            .setNegativeButton("بعداً", null)
+                            .show()
+                    }
+                }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
+    private fun downloadAndInstallApk(apkUrl: String, versionName: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "لطفاً اجازه نصب از این برنامه را فعال کنید و دوباره بزنید", Toast.LENGTH_LONG).show()
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            } catch (_: Exception) {}
+            return
+        }
+
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("در حال دانلود نسخه $versionName...")
+            .setMessage("لطفاً صبر کنید، فایل به‌روزرسانی در حال دریافت است.")
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+
+        Thread {
+            try {
+                val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
+                val apkFile = File(updatesDir, "update.apk")
+                val req = Request.Builder().url(apkUrl).cacheControl(CacheControl.FORCE_NETWORK).build()
+                val resp = imageCacheClient.newCall(req).execute()
+                val body = resp.body
+                if (!resp.isSuccessful || body == null) {
+                    resp.close()
+                    runOnUiThread {
+                        progressDialog.dismiss()
+                        Toast.makeText(this, "خطا در دانلود فایل آپدیت", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
+                body.byteStream().use { input ->
+                    FileOutputStream(apkFile).use { output -> input.copyTo(output) }
+                }
+                resp.close()
+
+                val contentUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apkFile)
+                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(contentUri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runOnUiThread {
+                    progressDialog.dismiss()
+                    startActivity(installIntent)
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    progressDialog.dismiss()
+                    Toast.makeText(this, "خطا در نصب نسخه جدید", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
     }
 
     override fun onDestroy() {
