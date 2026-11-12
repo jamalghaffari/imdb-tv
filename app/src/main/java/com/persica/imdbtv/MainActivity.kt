@@ -354,6 +354,23 @@ class MainActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 progressBar.visibility = View.GONE
                 webView.requestFocus()
+                if (url != null && url.startsWith("https://")) {
+                    webView.postDelayed({
+                        if (isFinishing || isDestroyed) return@postDelayed
+                        webView.evaluateJavascript(
+                            "(function(){var r=document.getElementById('root');return r?r.children.length:0;})()"
+                        ) { res ->
+                            if (res == "0" || res == "null") {
+                                val fallback = if (isAndroidTv()) {
+                                    "file:///android_asset/web/index.html?tv=1"
+                                } else {
+                                    "file:///android_asset/web/index.html"
+                                }
+                                webView.loadUrl(fallback)
+                            }
+                        }
+                    }, 4000L)
+                }
             }
         }
 
