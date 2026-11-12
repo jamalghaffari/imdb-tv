@@ -44,7 +44,13 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 class PlayerActivity : AppCompatActivity() {
     private var player: ExoPlayer? = null
@@ -303,7 +309,19 @@ class PlayerActivity : AppCompatActivity() {
     private fun initPlayer() {
         val browserUa = "Mozilla/5.0 (Linux; Android 11; SHIELD Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
+        val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        })
+        val sslContext = SSLContext.getInstance("TLS").apply {
+            init(null, trustAll, SecureRandom())
+        }
+
         val okHttpClient = OkHttpClient.Builder()
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .sslSocketFactory(sslContext.socketFactory, trustAll[0] as X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
@@ -315,9 +333,8 @@ class PlayerActivity : AppCompatActivity() {
                 val reqBuilder = req.newBuilder()
                     .header("User-Agent", browserUa)
                     .header("Accept", "*/*")
-                val ref = customReferer ?: "${req.url.scheme}://${req.url.host}/"
-                if (req.header("Referer") == null) {
-                    reqBuilder.header("Referer", ref)
+                if (!customReferer.isNullOrBlank() && req.header("Referer") == null) {
+                    reqBuilder.header("Referer", customReferer!!)
                 }
                 chain.proceed(reqBuilder.build())
             }
