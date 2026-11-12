@@ -449,7 +449,7 @@ class PlayerActivity : AppCompatActivity() {
         if (!rawId.startsWith("tt")) return
         val digits = rawId.removePrefix("tt")
         if (digits.isBlank()) return
-        val cacheFile = java.io.File(cacheDir, "sub_$rawId.srt")
+        val cacheFile = java.io.File(cacheDir, "sub_${rawId}_utf8.srt")
         if (cacheFile.exists() && cacheFile.length() > 100) {
             localSubUri = Uri.fromFile(cacheFile)
             return
@@ -476,8 +476,9 @@ class PlayerActivity : AppCompatActivity() {
                         val srtBytes = if (dlUrl.endsWith(".gz")) {
                             java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(bytes)).readBytes()
                         } else bytes
-                        if (srtBytes.size > 50) {
-                            cacheFile.writeBytes(srtBytes)
+                        val utf8Bytes = normalizeSrtToUtf8(srtBytes)
+                        if (utf8Bytes.size > 50) {
+                            cacheFile.writeBytes(utf8Bytes)
                             localSubUri = Uri.fromFile(cacheFile)
                             runOnUiThread {
                                 val p = player ?: return@runOnUiThread
@@ -501,6 +502,23 @@ class PlayerActivity : AppCompatActivity() {
                 }
             } catch (_: Exception) {}
         }.start()
+    }
+
+    private fun normalizeSrtToUtf8(raw: ByteArray): ByteArray {
+        return try {
+            val decoder = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            val text = decoder.decode(java.nio.ByteBuffer.wrap(raw)).toString()
+            text.toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+        } catch (_: Exception) {
+            try {
+                val cp1256 = java.nio.charset.Charset.forName("windows-1256")
+                String(raw, cp1256).toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+            } catch (_: Exception) {
+                raw
+            }
+        }
     }
 
     private fun playCandidateAt(index: Int) {
