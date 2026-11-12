@@ -859,9 +859,9 @@ const StoragePicker = ({cfg, setCfg}) => {
   const [hasPerm, setHasPerm] = React.useState(true);
   const refresh = () => {
     try {
-      const raw = window.AndroidBridge?.dmGetStorages?.();
+      const raw = (window.AndroidBridge && window.AndroidBridge.dmGetStorages ? window.AndroidBridge.dmGetStorages() : null);
       setList(raw ? JSON.parse(raw) : []);
-      if (window.AndroidBridge?.dmHasStoragePermission) {
+      if ((window.AndroidBridge && window.AndroidBridge.dmHasStoragePermission)) {
         setHasPerm(!!window.AndroidBridge.dmHasStoragePermission());
       }
     } catch (_) {}
@@ -874,7 +874,7 @@ const StoragePicker = ({cfg, setCfg}) => {
     ),
     !hasPerm && React.createElement("button", {
       type:"button",
-      onClick:()=>{ window.AndroidBridge?.dmRequestStoragePermission?.(); setTimeout(refresh, 1200); },
+      onClick:()=>{ (window.AndroidBridge && window.AndroidBridge.dmRequestStoragePermission && window.AndroidBridge.dmRequestStoragePermission()); setTimeout(refresh, 1200); },
       style:{width:"100%",padding:"10px 14px",borderRadius:"12px",backgroundColor:"rgba(245,197,24,0.14)",border:"1px solid rgba(245,197,24,0.5)",color:"#fcd34d",fontSize:"12px",fontWeight:900,textAlign:"center"}
     }, "اعطای مجوز دسترسی به حافظه و فلش در اندروید"),
     list.map(st => {
@@ -885,7 +885,7 @@ const StoragePicker = ({cfg, setCfg}) => {
         onClick: () => {
           const next = Object.assign({}, cfg, { storageMode: st.isUsb ? "usb" : st.id, customSavePath: st.path, savePath: st.path });
           setCfg(next);
-          window.AndroidBridge?.dmSaveConfig?.(JSON.stringify(next));
+          (window.AndroidBridge && window.AndroidBridge.dmSaveConfig && window.AndroidBridge.dmSaveConfig(JSON.stringify(next)));
         },
         style: {
           width:"100%", padding:"11px 14px", borderRadius:"12px", textAlign:"right",
