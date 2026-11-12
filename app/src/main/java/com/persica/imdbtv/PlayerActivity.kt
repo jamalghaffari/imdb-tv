@@ -27,6 +27,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -69,6 +70,8 @@ class PlayerActivity : AppCompatActivity() {
     private var candidateUrls: List<String> = emptyList()
     private var currentUrlIndex = 0
     private var customReferer: String? = null
+    private var imdbId: String? = null
+    @Volatile private var localSubUri: Uri? = null
     private var movieTitle: String = "سینما"
 
     private var subtitleScale = 1.0f
@@ -96,6 +99,7 @@ class PlayerActivity : AppCompatActivity() {
 
         movieTitle = intent.getStringExtra("title") ?: "سینما"
         customReferer = intent.getStringExtra("referer")
+        imdbId = intent.getStringExtra("imdbId")
         val urlsExtra = intent.getStringArrayListExtra("urls")
         val singleUrl = intent.getStringExtra("url") ?: ""
         candidateUrls = if (!urlsExtra.isNullOrEmpty()) {
@@ -397,6 +401,8 @@ class PlayerActivity : AppCompatActivity() {
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(5))
 
+        prefetchPersianSubtitle(okHttpClient)
+
         player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setTrackSelector(trackSelector)
@@ -438,11 +444,80 @@ class PlayerActivity : AppCompatActivity() {
         })
     }
 
+    private fun prefetchPersianSubtitle(client: OkHttpClient) {
+        val rawId = imdbId?.trim() ?: return
+        if (!rawId.startsWith("tt")) return
+        val digits = rawId.removePrefix("tt")
+        if (digits.isBlank()) return
+        val cacheFile = java.io.File(cacheDir, "sub_$rawId.srt")
+        if (cacheFile.exists() && cacheFile.length() > 100) {
+            localSubUri = Uri.fromFile(cacheFile)
+            return
+        }
+        Thread {
+            try {
+                val apiReq = okhttp3.Request.Builder()
+                    .url("https://rest.opensubtitles.org/search/imdbid-$digits/sublanguageid-per")
+                    .header("User-Agent", "TemporaryUserAgent")
+                    .build()
+                client.newCall(apiReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val body = resp.body?.string() ?: return@use
+                    val arr = org.json.JSONArray(body)
+                    if (arr.length() == 0) return@use
+                    val dlUrl = arr.getJSONObject(0).optString("SubDownloadLink")
+                    if (dlUrl.isBlank()) return@use
+                    val dlReq = okhttp3.Request.Builder()
+                        .url(dlUrl)
+                        .header("User-Agent", "TemporaryUserAgent")
+                        .build()
+                    client.newCall(dlReq).execute().use { dlResp ->
+                        val bytes = dlResp.body?.bytes() ?: return@use
+                        val srtBytes = if (dlUrl.endsWith(".gz")) {
+                            java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(bytes)).readBytes()
+                        } else bytes
+                        if (srtBytes.size > 50) {
+                            cacheFile.writeBytes(srtBytes)
+                            localSubUri = Uri.fromFile(cacheFile)
+                            runOnUiThread {
+                                val p = player ?: return@runOnUiThread
+                                val curUrl = candidateUrls.getOrNull(currentUrlIndex) ?: return@runOnUiThread
+                                val pos = p.currentPosition
+                                val subCfg = MediaItem.SubtitleConfiguration.Builder(localSubUri!!)
+                                    .setMimeType(MimeTypes.APPLICATION_SUBRIP)
+                                    .setLanguage("fa")
+                                    .setLabel("زیرنویس فارسی")
+                                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                                    .build()
+                                val updated = MediaItem.Builder()
+                                    .setUri(curUrl)
+                                    .setSubtitleConfigurations(listOf(subCfg))
+                                    .build()
+                                p.setMediaItem(updated, pos)
+                                p.prepare()
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
     private fun playCandidateAt(index: Int) {
         val url = candidateUrls.getOrNull(index) ?: return
         loadingSpinner.visibility = View.VISIBLE
         errorOverlay.visibility = View.GONE
-        val mediaItem = MediaItem.fromUri(url)
+        val builder = MediaItem.Builder().setUri(url)
+        localSubUri?.let { sub ->
+            val subCfg = MediaItem.SubtitleConfiguration.Builder(sub)
+                .setMimeType(MimeTypes.APPLICATION_SUBRIP)
+                .setLanguage("fa")
+                .setLabel("زیرنویس فارسی")
+                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                .build()
+            builder.setSubtitleConfigurations(listOf(subCfg))
+        }
+        val mediaItem = builder.build()
         player?.apply {
             setMediaItem(mediaItem)
             prepare()

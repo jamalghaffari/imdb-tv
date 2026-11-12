@@ -67,6 +67,8 @@ class MainActivity : AppCompatActivity() {
             .build()
     }
 
+    @Volatile var lastImdbId: String = ""
+
     private val playerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -164,10 +166,16 @@ class MainActivity : AppCompatActivity() {
 
     inner class WebAppInterface(private val activity: MainActivity) {
         @JavascriptInterface
+        fun setActiveImdbId(id: String) {
+            activity.lastImdbId = id.trim()
+        }
+
+        @JavascriptInterface
         fun playNative(title: String, url: String) {
             val intent = Intent(activity, PlayerActivity::class.java).apply {
                 putExtra("title", title)
                 putExtra("url", url)
+                if (activity.lastImdbId.isNotBlank()) putExtra("imdbId", activity.lastImdbId)
             }
             activity.runOnUiThread { activity.playerLauncher.launch(intent) }
         }
@@ -178,6 +186,7 @@ class MainActivity : AppCompatActivity() {
                 putExtra("title", title)
                 putExtra("url", url)
                 if (referer.isNotBlank()) putExtra("referer", referer)
+                if (activity.lastImdbId.isNotBlank()) putExtra("imdbId", activity.lastImdbId)
             }
             activity.runOnUiThread { activity.playerLauncher.launch(intent) }
         }
@@ -197,6 +206,7 @@ class MainActivity : AppCompatActivity() {
             val intent = Intent(activity, PlayerActivity::class.java).apply {
                 putExtra("title", title)
                 putStringArrayListExtra("urls", list)
+                if (activity.lastImdbId.isNotBlank()) putExtra("imdbId", activity.lastImdbId)
             }
             activity.runOnUiThread { activity.playerLauncher.launch(intent) }
         }
