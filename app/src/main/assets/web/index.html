@@ -205,6 +205,19 @@
       [data-tv-hero="true"] .rounded-full { flex: 0 0 auto !important; }
     }
 
+
+    @media (max-width: 767px) {
+      [data-tv-hero="true"] { min-height: 280px !important; justify-content: flex-end !important; }
+      [data-tv-hero="true"] > img:first-child {
+        filter: brightness(0.68) contrast(1.06) !important;
+        transform: scale(1.02) !important;
+        object-position: center 22% !important;
+      }
+      [data-tv-hero="true"] > div:nth-child(2) {
+        background: linear-gradient(to top, rgba(9,9,11,0.97) 18%, rgba(9,9,11,0.72) 55%, rgba(9,9,11,0.2) 100%) !important;
+      }
+    }
+
 </style>
     
     <!-- Vazirmatn Persian Font -->
