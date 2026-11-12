@@ -1,12 +1,15 @@
 package com.persica.imdbtv
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Message
 import android.provider.Settings
 import android.view.KeyEvent
@@ -20,6 +23,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
 import okhttp3.Cache
@@ -250,8 +255,49 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun getAppVersion(): String {
             return try {
-                activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: "1.7.3"
-            } catch (_: Exception) { "1.7.3" }
+                activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: "1.7.9"
+            } catch (_: Exception) { "1.7.9" }
+        }
+
+        @JavascriptInterface
+        fun dmGetStorages(): String {
+            return activity.downloadManager.getAvailableStoragesJson()
+        }
+
+        @JavascriptInterface
+        fun dmHasStoragePermission(): Boolean {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+
+        @JavascriptInterface
+        fun dmRequestStoragePermission() {
+            activity.runOnUiThread {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:${activity.packageName}")
+                        )
+                        activity.startActivity(intent)
+                    } catch (_: Exception) {
+                        try {
+                            activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                        } catch (_: Exception) {
+                            Toast.makeText(activity, "لطفاً در تنظیمات سیستم مجوز دسترسی حافظه را فعال کنید", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    ActivityCompat.requestPermissions(
+                        activity,
+                        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                        2026
+                    )
+                }
+            }
         }
     }
 

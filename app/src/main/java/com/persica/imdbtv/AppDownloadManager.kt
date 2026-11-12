@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
+import android.os.storage.StorageManager
 import okhttp3.ConnectionSpec
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -67,7 +69,8 @@ class AppDownloadManager(private val context: Context) {
     var startHour: Int = 2
     var endHour: Int = 7
     var wifiOnly: Boolean = true
-    var storageMode: String = "external" // external | internal
+    @Volatile var storageMode: String = "external" // "external" or "internal" or "usb"
+    @Volatile var customSavePath: String = ""
 
     private val client: OkHttpClient = run {
         val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
@@ -116,6 +119,14 @@ class AppDownloadManager(private val context: Context) {
     }
 
     private fun getSaveDir(): File {
+        if (customSavePath.isNotBlank()) {
+            try {
+                val custom = File(customSavePath)
+                if ((custom.exists() || custom.mkdirs()) && custom.canWrite()) {
+                    return custom
+                }
+            } catch (_: Exception) {}
+        }
         val dir = if (storageMode == "external") {
             context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: File(context.filesDir, "movies")
         } else {
@@ -123,6 +134,89 @@ class AppDownloadManager(private val context: Context) {
         }
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    fun getAvailableStoragesJson(): String {
+        val arr = JSONArray()
+        val seen = HashSet<String>()
+
+        fun addOption(id: String, label: String, dir: File?, isUsb: Boolean) {
+            if (dir == null) return
+            try {
+                if (!dir.exists()) dir.mkdirs()
+                val probe = File(dir, ".write_test")
+                val writable = try {
+                    probe.writeText("1")
+                    probe.delete()
+                    true
+                } catch (_: Exception) {
+                    dir.canWrite()
+                }
+                if (!writable) return
+                val abs = dir.absolutePath
+                if (!seen.add(abs)) return
+                val stat = StatFs(abs)
+                val freeGb = String.format(java.util.Locale.US, "%.1f", stat.availableBytes / (1024.0 * 1024.0 * 1024.0))
+                arr.put(JSONObject().apply {
+                    put("id", id)
+                    put("label", label)
+                    put("path", abs)
+                    put("freeGb", freeGb)
+                    put("isUsb", isUsb)
+                })
+            } catch (_: Exception) {}
+        }
+
+        // 1. Direct USB / Removable drives (e.g. /storage/XXXX-XXXX/IMDbCinema) when full storage permission is granted
+        try {
+            val sm = context.getSystemService(Context.STORAGE_SERVICE) as? StorageManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && sm != null) {
+                sm.storageVolumes.forEachIndexed { idx, vol ->
+                    if (vol.isRemovable) {
+                        val volDir = vol.directory
+                        if (volDir != null) {
+                            val name = vol.getDescription(context) ?: "فلش USB"
+                            addOption("usb_root_$idx", "💾 $name (پوشه مستقیم IMDbCinema)", File(volDir, "IMDbCinema"), true)
+                        }
+                    }
+                }
+            }
+            File("/storage").listFiles()?.forEachIndexed { idx, f ->
+                if (f.isDirectory && f.name !in setOf("emulated", "self")) {
+                    addOption("usb_mnt_$idx", "💾 فلش USB (${f.name})", File(f, "IMDbCinema"), true)
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. App-scoped external & removable dirs (always writable on Android TV without special permissions)
+        try {
+            val extDirs = context.getExternalFilesDirs(Environment.DIRECTORY_MOVIES)
+            extDirs.forEachIndexed { idx, d ->
+                if (d != null) {
+                    val isRemovable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        try { Environment.isExternalStorageRemovable(d) } catch (_: Exception) { idx > 0 }
+                    } else idx > 0
+                    if (isRemovable || idx > 0) {
+                        addOption("usb_app_$idx", "🔌 فلش USB / کارت حافظه (مسیر امن اندروید)", d, true)
+                    } else {
+                        addOption("external", "📱 حافظه داخلی دستگاه", d, false)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 3. Public Movies/IMDbCinema on primary storage (when granted)
+        try {
+            val pubMovies = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            if (pubMovies != null) {
+                addOption("public_movies", "🎬 پوشه عمومی Movies/IMDbCinema", File(pubMovies, "IMDbCinema"), false)
+            }
+        } catch (_: Exception) {}
+
+        // 4. Private internal fallback
+        addOption("internal", "🔒 حافظه خصوصی برنامه", File(context.filesDir, "movies"), false)
+
+        return arr.toString()
     }
 
     @Synchronized
@@ -135,6 +229,7 @@ class AppDownloadManager(private val context: Context) {
             endHour = obj.optInt("endHour", 7)
             wifiOnly = obj.optBoolean("wifiOnly", true)
             storageMode = obj.optString("storageMode", "external")
+            customSavePath = obj.optString("customSavePath", "")
         } catch (_: Exception) {}
     }
 
@@ -147,6 +242,7 @@ class AppDownloadManager(private val context: Context) {
             endHour = obj.optInt("endHour", 7).coerceIn(0, 23)
             wifiOnly = obj.optBoolean("wifiOnly", true)
             storageMode = obj.optString("storageMode", "external")
+            customSavePath = obj.optString("customSavePath", "")
             configFile.writeText(getConfigJson())
             evaluateQueue()
         } catch (_: Exception) {}
@@ -158,6 +254,7 @@ class AppDownloadManager(private val context: Context) {
         put("endHour", endHour)
         put("wifiOnly", wifiOnly)
         put("storageMode", storageMode)
+        put("customSavePath", customSavePath)
         put("savePath", getSaveDir().absolutePath)
     }.toString()
 
