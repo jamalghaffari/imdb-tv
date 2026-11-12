@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private lateinit var fullscreenContainer: FrameLayout
+    private lateinit var downloadManager: AppDownloadManager
     private var lastBackPressedMs: Long = 0L
     private var lastSniffedUrl: String = ""
 
@@ -84,6 +85,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        downloadManager = AppDownloadManager(this)
 
         val rootLayout = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -196,6 +198,47 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun playExternal(url: String) {
             activity.launchExternalPlayer(url)
+        }
+
+        @JavascriptInterface
+        fun dmEnqueue(id: String, title: String, url: String, quality: String) {
+            activity.downloadManager.enqueue(id, title, url, quality)
+        }
+
+        @JavascriptInterface
+        fun dmPause(id: String) {
+            activity.downloadManager.pause(id)
+        }
+
+        @JavascriptInterface
+        fun dmResume(id: String) {
+            activity.downloadManager.resume(id)
+        }
+
+        @JavascriptInterface
+        fun dmDelete(id: String) {
+            activity.downloadManager.delete(id)
+        }
+
+        @JavascriptInterface
+        fun dmGetAll(): String = activity.downloadManager.getAllJson()
+
+        @JavascriptInterface
+        fun dmGetConfig(): String = activity.downloadManager.getConfigJson()
+
+        @JavascriptInterface
+        fun dmSaveConfig(json: String) {
+            activity.downloadManager.saveConfig(json)
+        }
+
+        @JavascriptInterface
+        fun dmPlayLocal(filePath: String, title: String) {
+            val fileUrl = if (filePath.startsWith("file://")) filePath else "file://$filePath"
+            val intent = Intent(activity, PlayerActivity::class.java).apply {
+                putExtra("title", title)
+                putExtra("url", fileUrl)
+            }
+            activity.runOnUiThread { activity.playerLauncher.launch(intent) }
         }
     }
 
