@@ -504,7 +504,12 @@ class AppDownloadManager(private val context: Context) {
             } catch (e: Exception) {
                 task.status = "error"
                 task.speedBps = 0L
-                task.errorMsg = e.message?.take(60) ?: "خطای شبکه"
+                val raw = e.message ?: ""
+                task.errorMsg = when {
+                    raw.contains("reset", ignoreCase = true) || raw.contains("abort", ignoreCase = true) -> "قطع ارتباط شبکه (دوباره امتحان کنید)"
+                    raw.contains("timeout", ignoreCase = true) -> "زمان اتصال تمام شد"
+                    else -> raw.take(60).ifEmpty { "خطای شبکه" }
+                }
                 persistTasks()
                 evaluateQueue()
             }

@@ -14,6 +14,8 @@ object SmartDns : Dns {
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
     private val dohEndpoints = listOf(
+        "https://1.1.1.1/dns-query",
+        "https://8.8.8.8/resolve",
         "https://cloudflare-dns.com/dns-query",
         "https://dns.google/resolve"
     )
@@ -33,8 +35,8 @@ object SmartDns : Dns {
                 else -> Dns.SYSTEM.lookup(hostname)
             }
         })
-        .connectTimeout(4, TimeUnit.SECONDS)
-        .readTimeout(4, TimeUnit.SECONDS)
+        .connectTimeout(2500, TimeUnit.MILLISECONDS)
+        .readTimeout(2500, TimeUnit.MILLISECONDS)
         .build()
 
     override fun lookup(hostname: String): List<InetAddress> {
@@ -62,7 +64,10 @@ object SmartDns : Dns {
                         if (obj.optInt("type") == 1) {
                             val ipStr = obj.optString("data").trim()
                             if (ipStr.isNotEmpty() && !ipStr.startsWith("10.10.34.")) {
-                                resolved.add(InetAddress.getByName(ipStr))
+                                val addr = InetAddress.getByName(ipStr)
+                                if (!addr.isSiteLocalAddress && !addr.isLoopbackAddress && !addr.isAnyLocalAddress) {
+                                    resolved.add(addr)
+                                }
                             }
                         }
                     }
