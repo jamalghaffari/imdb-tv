@@ -17,8 +17,14 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import okhttp3.Cache
+import okhttp3.CacheControl
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
@@ -28,6 +34,24 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fullscreenContainer: FrameLayout
     private var lastBackPressedMs: Long = 0L
     private var lastSniffedUrl: String = ""
+
+    private val imageCacheClient: OkHttpClient by lazy {
+        val cacheDir = File(applicationContext.cacheDir, "poster_disk_cache")
+        val cache = Cache(cacheDir, 120L * 1024L * 1024L) // 120 MB lazy disk cache
+        OkHttpClient.Builder()
+            .cache(cache)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .addNetworkInterceptor { chain ->
+                val res = chain.proceed(chain.request())
+                res.newBuilder()
+                    .removeHeader("Pragma")
+                    .removeHeader("Cache-Control")
+                    .header("Cache-Control", "public, max-age=2592000") // 30 days
+                    .build()
+            }
+            .build()
+    }
 
     private val playerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -283,6 +307,28 @@ class MainActivity : AppCompatActivity() {
                             null
                         )
                     }
+                }
+
+                // کش تنبل (Lazy Disk Cache) تصاویر و پوسترها روی حافظه دیوایس
+                if (request?.method == "GET" && (lower.startsWith("http://") || lower.startsWith("https://")) &&
+                    (lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") || lower.contains(".webp") || lower.contains("m.media-amazon.com/images/"))
+                ) {
+                    try {
+                        val okReq = Request.Builder()
+                            .url(url)
+                            .cacheControl(CacheControl.Builder().maxStale(30, TimeUnit.DAYS).build())
+                            .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+                            .build()
+                        val resp = imageCacheClient.newCall(okReq).execute()
+                        if (resp.isSuccessful && resp.body != null) {
+                            val mime = resp.header("Content-Type")?.substringBefore(";")?.trim()
+                                ?: if (lower.contains(".png")) "image/png" else if (lower.contains(".webp")) "image/webp" else "image/jpeg"
+                            val headers = mapOf("Access-Control-Allow-Origin" to "*")
+                            return WebResourceResponse(mime, null, 200, "OK", headers, resp.body!!.byteStream())
+                        } else {
+                            resp.close()
+                        }
+                    } catch (_: Exception) {}
                 }
 
                 return super.shouldInterceptRequest(view, request)
