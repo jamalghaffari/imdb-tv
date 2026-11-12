@@ -511,6 +511,26 @@
 </style>
 <style>
     [data-tv-modal="true"] { position: fixed !important; top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important; display: flex !important; align-items: center !important; justify-content: center !important; z-index: 9999 !important; }
+
+    @media (max-width: 767px) {
+      body:not(.tv-mode) .mosaic-grid {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+        padding: 6px 2px 24px !important;
+        width: 100% !important;
+      }
+      body:not(.tv-mode) .mosaic-card {
+        min-width: 0 !important;
+        width: 100% !important;
+        overflow: hidden !important;
+      }
+      body:not(.tv-mode) .mosaic-card h3 {
+        font-size: 11px !important;
+        line-height: 1.35 !important;
+      }
+    }
+
 </style>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased selection:bg-amber-500 selection:text-black">
@@ -826,7 +846,7 @@ const TvHomeRows = ({p, W, xe, k, _, Se, Ze, PurePoster}) => {
       ),
       React.createElement("div", { className: "tv-row-scroll" }, sh.list.map((e, cIdx) => {
         var i;
-        const origIdx = idxMap.get(e.id) ?? 0;
+        const origIdx = idxMap.has(e.id) ? idxMap.get(e.id) : 0;
         return React.createElement("button", {
           key: e.id, type: "button", "data-tv-grid-card": "true",
           autoFocus: sIdx === 0 && cIdx === 0,
