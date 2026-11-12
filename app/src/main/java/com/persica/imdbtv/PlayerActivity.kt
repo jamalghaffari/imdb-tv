@@ -387,8 +387,18 @@ class PlayerActivity : AppCompatActivity() {
 
             override fun onPlayerError(error: PlaybackException) {
                 loadingSpinner.visibility = View.GONE
-                if (currentUrlIndex + 1 < candidateUrls.size) {
-                    currentUrlIndex++
+                val failedHost = try { Uri.parse(candidateUrls.getOrNull(currentUrlIndex) ?: "").host ?: "" } catch (_: Exception) { "" }
+                var nextIdx = currentUrlIndex + 1
+                while (nextIdx < candidateUrls.size) {
+                    val nextHost = try { Uri.parse(candidateUrls[nextIdx]).host ?: "" } catch (_: Exception) { "" }
+                    if (failedHost.isNotBlank() && nextHost == failedHost) {
+                        nextIdx++
+                    } else {
+                        break
+                    }
+                }
+                if (nextIdx < candidateUrls.size) {
+                    currentUrlIndex = nextIdx
                     Toast.makeText(
                         this@PlayerActivity,
                         "تلاش با سرور جایگزین (${currentUrlIndex + 1}/${candidateUrls.size})...",
