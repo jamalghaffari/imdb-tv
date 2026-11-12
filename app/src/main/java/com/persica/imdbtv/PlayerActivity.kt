@@ -59,6 +59,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var loadingSpinner: ProgressBar
     private lateinit var errorOverlay: LinearLayout
     private lateinit var errorDetailText: TextView
+    private lateinit var btnErrOnline: Button
 
     private var candidateUrls: List<String> = emptyList()
     private var currentUrlIndex = 0
@@ -205,25 +206,32 @@ class PlayerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
 
-        val btnRetry = makeTopButton("🔄 تلاش مجدد", 0xFFF5C518.toInt(), Color.BLACK) {
+        btnErrOnline = makeTopButton("🌐 سرور پخش آنلاین", 0xFFF5C518.toInt(), Color.BLACK) {
+            setResult(RESULT_FIRST_USER)
+            finish()
+        }
+        val btnRetry = makeTopButton("🔄 تلاش مجدد", 0xFF27272A.toInt(), Color.WHITE) {
             errorOverlay.visibility = View.GONE
             currentUrlIndex = 0
             playCandidateAt(0)
         }
-        val btnErrExternal = makeTopButton("▶ پخش با VLC / پلیر گوشی", 0xFFEA580C.toInt(), Color.WHITE) {
+        val btnErrExternal = makeTopButton("▶ پخش با VLC", 0xFF27272A.toInt(), Color.WHITE) {
             openCurrentInExternalPlayer()
-        }
-        val btnErrOnline = makeTopButton("🌐 سرور پخش آنلاین", 0xFF7C3AED.toInt(), Color.WHITE) {
-            setResult(RESULT_FIRST_USER)
-            finish()
         }
         val btnErrClose = makeTopButton("✕ بستن", 0xFF27272A.toInt(), Color.WHITE) {
             finish()
         }
 
+        val errBtns = listOf(btnErrOnline, btnRetry, btnErrExternal, btnErrClose)
+        errBtns.forEach { it.id = View.generateViewId() }
+        for (i in errBtns.indices) {
+            if (i > 0) errBtns[i].nextFocusLeftId = errBtns[i - 1].id
+            if (i < errBtns.lastIndex) errBtns[i].nextFocusRightId = errBtns[i + 1].id
+        }
+
+        errButtonsRow.addView(btnErrOnline)
         errButtonsRow.addView(btnRetry)
         errButtonsRow.addView(btnErrExternal)
-        errButtonsRow.addView(btnErrOnline)
         errButtonsRow.addView(btnErrClose)
 
         errorOverlay.addView(errorDetailText)
@@ -388,7 +396,8 @@ class PlayerActivity : AppCompatActivity() {
                     ).show()
                     playCandidateAt(currentUrlIndex)
                 } else {
-                    showErrorState("خطا در پخش مستقیم (${error.errorCodeName}). می‌توانید با سرور آنلاین یا VLC پخش کنید.")
+                    val causeMsg = error.cause?.message?.take(60) ?: ""
+                    showErrorState("سرور فایل مستقیم در دسترس نیست (${error.errorCodeName}${if (causeMsg.isNotBlank()) ": $causeMsg" else ""}).\nبرای تماشا، «سرور پخش آنلاین» را انتخاب کنید.")
                 }
             }
         })
@@ -410,6 +419,7 @@ class PlayerActivity : AppCompatActivity() {
         loadingSpinner.visibility = View.GONE
         errorDetailText.text = msg
         errorOverlay.visibility = View.VISIBLE
+        btnErrOnline.post { btnErrOnline.requestFocus() }
     }
 
     private fun openCurrentInExternalPlayer() {
