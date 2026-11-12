@@ -43,12 +43,17 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import okhttp3.ConnectionSpec
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
+import java.net.InetAddress
+import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
@@ -325,10 +330,29 @@ class PlayerActivity : AppCompatActivity() {
         val sslContext = SSLContext.getInstance("TLS").apply {
             init(null, trustAll, SecureRandom())
         }
+        val baseFactory = sslContext.socketFactory
+        val compatFactory = object : SSLSocketFactory() {
+            private fun patch(s: Socket): Socket {
+                if (s is SSLSocket) {
+                    val supported = s.supportedProtocols.toSet()
+                    val desired = listOf("TLSv1.3", "TLSv1.2", "TLSv1.1", "TLSv1").filter { it in supported }
+                    if (desired.isNotEmpty()) s.enabledProtocols = desired.toTypedArray()
+                }
+                return s
+            }
+            override fun getDefaultCipherSuites(): Array<String> = baseFactory.defaultCipherSuites
+            override fun getSupportedCipherSuites(): Array<String> = baseFactory.supportedCipherSuites
+            override fun createSocket(s: Socket, host: String, port: Int, autoClose: Boolean) = patch(baseFactory.createSocket(s, host, port, autoClose))
+            override fun createSocket(host: String, port: Int) = patch(baseFactory.createSocket(host, port))
+            override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int) = patch(baseFactory.createSocket(host, port, localHost, localPort))
+            override fun createSocket(host: InetAddress, port: Int) = patch(baseFactory.createSocket(host, port))
+            override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int) = patch(baseFactory.createSocket(address, port, localAddress, localPort))
+        }
 
         val okHttpClient = OkHttpClient.Builder()
             .protocols(listOf(Protocol.HTTP_1_1))
-            .sslSocketFactory(sslContext.socketFactory, trustAll[0] as X509TrustManager)
+            .connectionSpecs(listOf(ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT))
+            .sslSocketFactory(compatFactory, trustAll[0] as X509TrustManager)
             .hostnameVerifier { _, _ -> true }
             .followRedirects(true)
             .followSslRedirects(true)
