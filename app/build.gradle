@@ -7,16 +7,30 @@ android {
     namespace 'com.persica.imdbtv'
     compileSdk 35
 
+    signingConfigs {
+        persica {
+            storeFile file('persica.p12')
+            storePassword 'persica1234'
+            keyAlias 'persica'
+            keyPassword 'persica1234'
+            storeType 'PKCS12'
+        }
+    }
+
     defaultConfig {
         applicationId "com.persica.imdbtv"
         minSdk 21
         targetSdk 34
-        versionCode 11
-        versionName "1.7.0"
+        versionCode 12
+        versionName "1.7.1"
     }
 
     buildTypes {
+        debug {
+            signingConfig signingConfigs.persica
+        }
         release {
+            signingConfig signingConfigs.persica
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
