@@ -42,12 +42,12 @@ class SplashActivity : AppCompatActivity() {
         thread {
             var isLiveServerAvailable = false
             try {
-                // Ping live host with 1.8s timeout
+                // Ping live host with 3.5s timeout
                 val connection = (URL("https://persicatheme.ir/imdb/").openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 1800
-                    readTimeout = 1800
-                    requestMethod = "HEAD"
-                    setRequestProperty("User-Agent", "IMDbCinema-Android")
+                    connectTimeout = 3500
+                    readTimeout = 3500
+                    requestMethod = "GET"
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
                 }
                 val code = connection.responseCode
                 if (code in 200..399) {
