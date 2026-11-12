@@ -240,6 +240,18 @@ class MainActivity : AppCompatActivity() {
             }
             activity.runOnUiThread { activity.playerLauncher.launch(intent) }
         }
+
+        @JavascriptInterface
+        fun checkAppUpdateManual() {
+            activity.checkForAppUpdate(manual = true)
+        }
+
+        @JavascriptInterface
+        fun getAppVersion(): String {
+            return try {
+                activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: "1.7.3"
+            } catch (_: Exception) { "1.7.3" }
+        }
     }
 
     fun launchExternalPlayer(rawUrl: String) {
@@ -502,7 +514,7 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    private fun checkForAppUpdate() {
+    private fun checkForAppUpdate(manual: Boolean = false) {
         Thread {
             try {
                 val req = Request.Builder()
@@ -512,7 +524,12 @@ class MainActivity : AppCompatActivity() {
                 val resp = imageCacheClient.newCall(req).execute()
                 val body = resp.body?.string()
                 resp.close()
-                if (!resp.isSuccessful || body.isNullOrBlank()) return@Thread
+                if (!resp.isSuccessful || body.isNullOrBlank()) {
+                    if (manual) runOnUiThread {
+                        Toast.makeText(this, "خطا در بررسی نسخه جدید", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
 
                 val json = JSONObject(body)
                 val remoteCode = json.optLong("versionCode", 0L)
@@ -535,8 +552,16 @@ class MainActivity : AppCompatActivity() {
                             .setNegativeButton("بعداً", null)
                             .show()
                     }
+                } else if (manual && !isFinishing && !isDestroyed) {
+                    runOnUiThread {
+                        Toast.makeText(this, "شما در حال استفاده از آخرین نسخه (${pInfo.versionName}) هستید.", Toast.LENGTH_LONG).show()
+                    }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                if (manual) runOnUiThread {
+                    Toast.makeText(this, "خطا در اتصال به سرور بروزرسانی", Toast.LENGTH_SHORT).show()
+                }
+            }
         }.start()
     }
 
