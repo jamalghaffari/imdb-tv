@@ -26,6 +26,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.core.content.pm.PackageInfoCompat
 import okhttp3.Cache
 import okhttp3.CacheControl
@@ -40,6 +41,7 @@ import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
+    private lateinit var swipeRefresh: SwipeRefreshLayout
     private lateinit var progressBar: ProgressBar
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
@@ -131,7 +133,22 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
 
-        rootLayout.addView(webView)
+        swipeRefresh = SwipeRefreshLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            setColorSchemeColors(0xFFF5C518.toInt())
+            setProgressBackgroundColorSchemeColor(0xFF141722.toInt())
+            setOnChildScrollUpCallback { _, _ -> webView.scrollY > 0 }
+            setOnRefreshListener {
+                webView.clearCache(false)
+                webView.reload()
+            }
+            addView(webView)
+        }
+
+        rootLayout.addView(swipeRefresh)
         rootLayout.addView(progressBar)
         rootLayout.addView(fullscreenContainer)
         setContentView(rootLayout)
@@ -476,6 +493,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 progressBar.visibility = View.GONE
+                if (::swipeRefresh.isInitialized) swipeRefresh.isRefreshing = false
                 webView.requestFocus()
                 if (url != null && url.startsWith("https://")) {
                     webView.postDelayed({
