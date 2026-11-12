@@ -133,22 +133,26 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
 
-        swipeRefresh = SwipeRefreshLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            setColorSchemeColors(0xFFF5C518.toInt())
-            setProgressBackgroundColorSchemeColor(0xFF141722.toInt())
-            setOnChildScrollUpCallback { _, _ -> webView.scrollY > 0 }
-            setOnRefreshListener {
-                webView.clearCache(false)
-                webView.reload()
+        val isTv = isAndroidTv()
+        if (isTv) {
+            rootLayout.addView(webView)
+        } else {
+            swipeRefresh = SwipeRefreshLayout(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                setColorSchemeColors(0xFFF5C518.toInt())
+                setProgressBackgroundColorSchemeColor(0xFF141722.toInt())
+                setOnChildScrollUpCallback { _, _ -> webView.scrollY > 0 }
+                setOnRefreshListener {
+                    webView.clearCache(false)
+                    webView.reload()
+                }
+                addView(webView)
             }
-            addView(webView)
+            rootLayout.addView(swipeRefresh)
         }
-
-        rootLayout.addView(swipeRefresh)
         rootLayout.addView(progressBar)
         rootLayout.addView(fullscreenContainer)
         setContentView(rootLayout)
@@ -161,7 +165,6 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
 
-        val isTv = isAndroidTv()
         val useLive = intent.getBooleanExtra("use_live", false)
 
         val targetUrl = when {
@@ -579,6 +582,38 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isAndroidTv() && event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    webView.evaluateJavascript("window.__tvSpatialNav && window.__tvSpatialNav('ArrowUp');", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    webView.evaluateJavascript("window.__tvSpatialNav && window.__tvSpatialNav('ArrowDown');", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    webView.evaluateJavascript("window.__tvSpatialNav && window.__tvSpatialNav('ArrowLeft');", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    webView.evaluateJavascript("window.__tvSpatialNav && window.__tvSpatialNav('ArrowRight');", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    webView.evaluateJavascript("(() => { const el = document.activeElement; if (el && typeof el.click === 'function') el.click(); })();", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> {
+                    handleBackOrExit()
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
