@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
@@ -119,8 +121,8 @@ class PlayerActivity : AppCompatActivity() {
         topOverlay = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(36, 26, 36, 18)
-            setBackgroundColor(0x66000000)
+            setPadding(32, 20, 32, 16)
+            setBackgroundColor(0xCC090B10.toInt())
             visibility = View.GONE
         }
 
@@ -147,6 +149,21 @@ class PlayerActivity : AppCompatActivity() {
         }
         val btnBack = makeTopButton("✕ خروج", 0x99222222.toInt(), Color.WHITE) {
             finish()
+        }
+
+        val topButtons = listOf(btnAudio, btnSub, btnSettings, btnVlc, btnBack)
+        topButtons.forEach { it.id = View.generateViewId() }
+        for (i in topButtons.indices) {
+            if (i > 0) topButtons[i].nextFocusLeftId = topButtons[i - 1].id
+            if (i < topButtons.lastIndex) topButtons[i].nextFocusRightId = topButtons[i + 1].id
+            topButtons[i].setOnFocusChangeListener { v, hasFocus ->
+                if (hasFocus) {
+                    playerView.showController()
+                    v.animate().scaleX(1.07f).scaleY(1.07f).setDuration(120).start()
+                } else {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start()
+                }
+            }
         }
 
         topOverlay.addView(titleView)
@@ -236,18 +253,49 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun makeTopButton(label: String, bgColor: Int, fgColor: Int, onClick: () -> Unit): Button {
+        val density = resources.displayMetrics.density
+        val radius = 12f * density
+        val normalBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radius
+            setColor(bgColor)
+            setStroke((1 * density).toInt(), 0x33FFFFFF)
+        }
+        val focusedBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radius
+            setColor(bgColor)
+            setStroke((3 * density).toInt(), 0xFFF5C518.toInt())
+        }
+        val selector = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), focusedBg)
+            addState(intArrayOf(android.R.attr.state_selected), focusedBg)
+            addState(intArrayOf(), normalBg)
+        }
+
         return Button(this).apply {
             text = label
             setTextColor(fgColor)
-            setBackgroundColor(bgColor)
-            textSize = 12f
+            background = selector
+            stateListAnimator = null
+            minHeight = 0
+            minimumHeight = 0
+            minWidth = 0
+            minimumWidth = 0
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
             isAllCaps = false
             isFocusable = true
-            setPadding(20, 10, 20, 10)
+            isFocusableInTouchMode = false
+            gravity = Gravity.CENTER
+            setPadding((14 * density).toInt(), (8 * density).toInt(), (14 * density).toInt(), (8 * density).toInt())
             val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(10, 0, 0, 0)
+            lp.setMargins((8 * density).toInt(), 0, 0, 0)
             layoutParams = lp
-            setOnClickListener { onClick() }
+            setOnClickListener {
+                playerView.showController()
+                onClick()
+            }
         }
     }
 
@@ -519,6 +567,34 @@ class PlayerActivity : AppCompatActivity() {
                 player?.playbackParameters = PlaybackParameters(playbackSpeed)
             }
             .show()
+    }
+
+    private fun isFocusInTopOverlay(): Boolean {
+        val focused = currentFocus ?: return false
+        var p = focused.parent
+        while (p != null) {
+            if (p === topOverlay) return true
+            p = p.parent
+        }
+        return false
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && errorOverlay.visibility != View.VISIBLE) {
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && !isFocusInTopOverlay()) {
+                playerView.showController()
+                topOverlay.visibility = View.VISIBLE
+                val target = (if (topOverlay.childCount > 2) topOverlay.getChildAt(2) else topOverlay.getChildAt(0))
+                target?.requestFocus()
+                return true
+            }
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN && isFocusInTopOverlay()) {
+                playerView.showController()
+                playerView.requestFocus()
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
