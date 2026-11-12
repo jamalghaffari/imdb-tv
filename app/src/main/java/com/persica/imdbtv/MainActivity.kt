@@ -309,22 +309,25 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // کش تنبل (Lazy Disk Cache) تصاویر و پوسترها روی حافظه دیوایس
+                // کش تنبل (Lazy Disk Cache) تصاویر و پوسترها + downloads.json روی حافظه دیوایس (رفع کامل CORS در حالت آفلاین)
                 if (request?.method == "GET" && (lower.startsWith("http://") || lower.startsWith("https://")) &&
-                    (lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") || lower.contains(".webp") || lower.contains("m.media-amazon.com/images/"))
+                    (lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") || lower.contains(".webp") || lower.contains("m.media-amazon.com/images/") || lower.contains("persicatheme.ir/imdb/downloads.json"))
                 ) {
                     try {
+                        val isJson = lower.contains("downloads.json")
                         val okReq = Request.Builder()
                             .url(url)
-                            .cacheControl(CacheControl.Builder().maxStale(30, TimeUnit.DAYS).build())
+                            .cacheControl(CacheControl.Builder().maxStale(if (isJson) 1 else 30, TimeUnit.DAYS).build())
                             .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
                             .build()
                         val resp = imageCacheClient.newCall(okReq).execute()
                         if (resp.isSuccessful && resp.body != null) {
-                            val mime = resp.header("Content-Type")?.substringBefore(";")?.trim()
-                                ?: if (lower.contains(".png")) "image/png" else if (lower.contains(".webp")) "image/webp" else "image/jpeg"
+                            val mime = if (isJson) "application/json" else (
+                                resp.header("Content-Type")?.substringBefore(";")?.trim()
+                                    ?: if (lower.contains(".png")) "image/png" else if (lower.contains(".webp")) "image/webp" else "image/jpeg"
+                            )
                             val headers = mapOf("Access-Control-Allow-Origin" to "*")
-                            return WebResourceResponse(mime, null, 200, "OK", headers, resp.body!!.byteStream())
+                            return WebResourceResponse(mime, if (isJson) "UTF-8" else null, 200, "OK", headers, resp.body!!.byteStream())
                         } else {
                             resp.close()
                         }
