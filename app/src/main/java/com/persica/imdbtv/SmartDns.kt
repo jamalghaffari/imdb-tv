@@ -20,17 +20,17 @@ object SmartDns : Dns {
 
     // Bootstrap IPs so DoH endpoints never depend on poisoned operator DNS
     private val bootstrapClient = OkHttpClient.Builder()
-        .dns(Dns { host ->
-            when (host) {
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> = when (hostname) {
                 "cloudflare-dns.com" -> listOf(
-                    InetAddress.getByAddress(host, byteArrayOf(1, 1, 1, 1)),
-                    InetAddress.getByAddress(host, byteArrayOf(1, 0, 0, 1))
+                    InetAddress.getByAddress(hostname, byteArrayOf(1, 1, 1, 1)),
+                    InetAddress.getByAddress(hostname, byteArrayOf(1, 0, 0, 1))
                 )
                 "dns.google" -> listOf(
-                    InetAddress.getByAddress(host, byteArrayOf(8, 8, 8, 8)),
-                    InetAddress.getByAddress(host, byteArrayOf(8, 8, 4, 4))
+                    InetAddress.getByAddress(hostname, byteArrayOf(8, 8, 8, 8)),
+                    InetAddress.getByAddress(hostname, byteArrayOf(8, 8, 4, 4))
                 )
-                else -> Dns.SYSTEM.lookup(host)
+                else -> Dns.SYSTEM.lookup(hostname)
             }
         })
         .connectTimeout(4, TimeUnit.SECONDS)
