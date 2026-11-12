@@ -133,9 +133,9 @@
     .tv-row-scroll { display: flex; flex-direction: row; gap: 16px; overflow-x: auto; padding: 8px 4px 16px; scrollbar-width: none; }
     .tv-row-scroll::-webkit-scrollbar { display: none; }
     .tv-row-card { width: 156px; flex-shrink: 0; text-align: right; transition: transform 0.16s ease; border-radius: 14px; }
-    .tv-row-card:focus { outline: 3px solid #F5C518; outline-offset: 4px; transform: scale(1.04); }
+    body.tv-mode .tv-row-card:focus { outline: 3px solid #F5C518; outline-offset: 4px; transform: scale(1.04); }
     .tv-rail-btn { display: flex; align-items: center; gap: 12px; width: 100%; height: 42px; padding: 0 12px; border-radius: 12px; font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; transition: all 0.15s ease; text-align: right; }
-    .tv-rail-btn:focus { outline: 2px solid #F5C518; outline-offset: 2px; background-color: rgba(245,197,24,0.18) !important; color: #F5C518 !important; }
+    body.tv-mode .tv-rail-btn:focus { outline: 2px solid #F5C518; outline-offset: 2px; background-color: rgba(245,197,24,0.18) !important; color: #F5C518 !important; }
 
 
     .mobile-bottom-dock { display: none; }
@@ -216,6 +216,11 @@
       [data-tv-hero="true"] > div:nth-child(2) {
         background: linear-gradient(to top, rgba(9,9,11,0.97) 18%, rgba(9,9,11,0.72) 55%, rgba(9,9,11,0.2) 100%) !important;
       }
+    }
+
+
+    body:not(.tv-mode) button:focus, body:not(.tv-mode) a:focus, body:not(.tv-mode) .tv-row-card:focus, body:not(.tv-mode) [tabindex]:focus {
+      outline: none !important;
     }
 
 </style>
